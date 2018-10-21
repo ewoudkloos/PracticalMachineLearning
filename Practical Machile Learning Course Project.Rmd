@@ -1,0 +1,169 @@
+---
+title: Course Project Practical Machine Learning
+author: "E. Kloos"
+date: "21 oktober 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introduction
+
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project 6 particitpants were asked to perform barbell lifts in 5 different ways where they were asked to ghe excercse in certain sets  correctly and others incorrectly. Or goal is to make a model that can classify from the data if a set barbell lift was done corrclt  or incorreclty. The data we have is from accelerometers on the belt, forearm, arm, and dumbell. 
+(For more information on where the data came from please visit <http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har>).
+
+__Bellow we find all packages that we will use during this project.__
+```{r}
+library(rattle)
+library(corrplot)
+library(caret)
+```
+
+## Collecting and examening the data
+
+First we will collect the data get a overview of how the data looks like.
+
+```{r}
+training <- read.csv("~/pml-training.csv")
+testing_org <- read.csv("~/pml-testing.csv")
+#We see that the testset only has 20 observations. Compared to the training set, this is a too small sample. 
+#We will therefor create our own training set.
+
+set.seed(333)
+train_index <- createDataPartition(training$classe, p = 0.70, list = FALSE)
+training <- training[train_index,]
+testing <- training[-train_index,]
+
+dim(training)
+```
+The training set consits of 13737 observations with 160 variables. The variable we want to predict is the 'class' variable.
+
+```{r}
+summary(training$classe)
+```
+We see that there are 5 groups that can be classified.
+
+## Preprocessing
+
+Because of the high dimensionalilty of out dataset there is a chance we will run into models with very high complexity. We there for will first examin if there are variables that have near zero varaince, and remove these form out data. Furthermore we will remove variables that are for the most part NA values and are identification varialbes (these variables do not give any extra prediciton power).
+
+```{r}
+#Remove near zero values
+nzv <- nearZeroVar(training)
+training <- training[,-nzv]
+testing <- testing[, -nzv]
+
+#remove variables with a lot of NA values
+variables_na <- sapply(training, function(x) mean(is.na(x))) > 0.95
+training <- training[, !variables_na]
+testing <- testing[, !variables_na]
+
+#remove identification variables
+training <- training[,-(1:5)]
+testing <- testing[,-(1:5)]
+
+dim(training)
+```
+
+Now that we have removed variables that will not add a lot of prediction power because of low variance and/or are mostly NA values, we will examin the correlation between variables.
+
+```{r}
+cor_matrix <- cor(training[,-54])
+corrplot(cor_matrix, type="upper")
+```
+Wee se that most variables do not have a lot of correlation wih each other. We do see a few clusters of cariables that are correlated, but because these are so few, there is no gain in further dimensionality reduction/preprocessing.
+
+## Creating models
+
+For this problem we will build multiple models so that we ca compare them to each other. We will take the following models:
+
+- Decision tree
+- Random Forrest
+- Boosting tree
+
+
+#### Decision Tree
+
+```{r}
+time1 <- system.time(mod1 <- train(classe ~. , data = training, method = "rpart"))
+time1
+```
+
+We take a look at the tree
+```{r}
+fancyRpartPlot(mod1$finalModel)
+```
+
+
+From this plot we see that the first node was from the variable __roll_belt__ with a split at value 131. This varaible has apparently the most information gain.
+
+#### Random Forrest
+
+```{r}
+time2 <- system.time(mod2 <- train(classe ~. , data = training, method = "rf"))
+time2
+```
+
+#### Boosted tree
+
+```{r}
+time3 <- system.time(mod3 <- train(classe ~. , data =  training, method = "gbm"))
+time3
+```
+
+
+## Evaluation
+
+We will now see ho well the models preform. We will look at there in sample and out of sample performance.
+
+```{r}
+pred1_in <- predict(mod1, training)
+pred2_in <- predict(mod2, training)
+pred3_in <- predict(mod3, training)
+
+pred1_out <- predict(mod1, testing)
+pred2_out <- predict(mod2, testing)
+pred3_out <- predict(mod3, testing)
+
+
+confusion_pred1_in <- confusionMatrix(pred1_in, training$classe)
+confusion_pred2_in <- confusionMatrix(pred2_in, training$classe)
+confusion_pred3_in <- confusionMatrix(pred3_in, training$classe)
+
+confusion_pred1_out <- confusionMatrix(pred1_out, testing$classe)
+confusion_pred2_out <- confusionMatrix(pred2_out, testing$classe)
+confusion_pred3_out <- confusionMatrix(pred3_out, testing$classe)
+```
+
+#### In sample Accuracy
+```{r, fig.width= 10}
+par(mfrow=c(1,3))
+plot(confusion_pred1_in$table, main = paste("Model 1 - Decision Tree - Accuracy "
+                                            , round(confusion_pred1_in$overall[["Accuracy"]], 3)))
+plot(confusion_pred2_in$table, main = paste("Model 2 - Random Forest - Accuracy "
+                                            , round(confusion_pred2_in$overall[["Accuracy"]], 3)))
+plot(confusion_pred2_in$table, main = paste("Model 3 - Boosted Tree - Accuracy "
+                                            , round(confusion_pred3_in$overall[["Accuracy"]], 3)))
+```
+
+
+#### Out of sample Accuracy
+```{r, fig.width= 10}
+par(mfrow=c(1,3))
+plot(confusion_pred1_out$table, main = paste("Model 1 - Decision Tree - Accuracy "
+                                            , round(confusion_pred1_out$overall[["Accuracy"]], 3)))
+plot(confusion_pred2_out$table, main = paste("Model 2 - Random Forest - Accuracy "
+                                            , round(confusion_pred2_out$overall[["Accuracy"]], 3)))
+plot(confusion_pred2_out$table, main = paste("Model 3 - Boosted Tree - Accuracy "
+                                            , round(confusion_pred3_out$overall[["Accuracy"]], 3)))
+```
+
+
+## Final thoughts
+
+From our examination we see that Random forest has the best accuracy with alomst 100% succesrate. The trade-off for this algorithm is that is has very high compuationtional complexity. The random forest model took `r time2[[3]]` seconds to build. The boosted tree wich took `r time3[[3]]` seconds to build took a less time and has preforms almost equallt good with 99.3%. The decision tree has very little computational complexity but preforms very bad with 50% accuracy. Based on these findings it might be best to choose for the boosted forest model because of the high accuracy (on test and training i.e. in generalizes well) and the lower complexity than the random forrest has.
+
+
+
